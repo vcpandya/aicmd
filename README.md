@@ -10,8 +10,9 @@
 <h1 align="center">zx — Speak Human, Run Machine</h1>
 
 <p align="center">
-  Natural language to terminal commands, powered by Google Gemini AI.<br>
+  Natural language to terminal commands, powered by AI.<br>
   Type what you want in plain English. Get the exact terminal command.<br>
+  Supports <strong>100+ AI providers</strong> — Gemini, OpenRouter, Ollama, vLLM, and more via LiteLLM.<br>
   Works on <strong>Windows</strong> (cmd / PowerShell), <strong>Linux</strong>, and <strong>macOS</strong>.
 </p>
 
@@ -19,6 +20,8 @@
   <a href="#installation">Install</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#features">Features</a> &bull;
+  <a href="#multi-provider-support">Providers</a> &bull;
+  <a href="#cost-tracking--budgets">Cost Tracking</a> &bull;
   <a href="#command-reference">Commands</a> &bull;
   <a href="#configuration">Config</a>
 </p>
@@ -27,10 +30,15 @@
 
 ## Installation
 
-**Requirements:** Python 3.10+ and a [Google Gemini API key](https://aistudio.google.com/apikey) (free tier available).
+**Requirements:** Python 3.10+
 
 ```bash
 pip install zx-ai
+```
+
+For Gemini fallback support (optional):
+```bash
+pip install zx-ai[gemini]
 ```
 
 Then run the setup wizard:
@@ -39,9 +47,9 @@ Then run the setup wizard:
 zx setup
 ```
 
-This will prompt you for your Gemini API key, preferences (auto-approve, model, clean mode), and validate the connection.
+This will prompt you to select your AI provider(s), enter API keys, choose a default model, and configure budget limits.
 
-> **Tip:** You can also set `GEMINI_API_KEY` as an environment variable instead of running setup.
+> **Tip:** You can also set provider-specific environment variables (e.g., `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`) instead of running setup.
 
 ---
 
@@ -64,7 +72,108 @@ npm run build 2>&1 | zx fix
 
 # Learn shell skills interactively
 zx learn
+
+# Track your AI spending
+zx cost
 ```
+
+---
+
+## Multi-Provider Support
+
+zx uses **LiteLLM** as its AI backend, giving you access to 100+ providers with a unified interface. Switch providers by changing your model string — no code changes needed.
+
+### Supported Providers
+
+| Provider | Model Format | API Key Env Var |
+|----------|-------------|-----------------|
+| **Google Gemini** | `gemini/gemini-2.0-flash-lite` | `GEMINI_API_KEY` |
+| **OpenRouter** | `openrouter/anthropic/claude-3.5-sonnet` | `OPENROUTER_API_KEY` |
+| **OpenAI** | `openai/gpt-4o` | `OPENAI_API_KEY` |
+| **Anthropic** | `anthropic/claude-3.5-sonnet` | `ANTHROPIC_API_KEY` |
+| **Ollama** (local) | `ollama_chat/gemma3` | None (free) |
+| **vLLM** (local) | `vllm/my-model` | None (free) |
+| **Any LiteLLM provider** | See [LiteLLM docs](https://docs.litellm.ai/docs/providers) | Varies |
+
+### Using Local Models (Free & Private)
+
+Run entirely offline with Ollama or vLLM — no API key needed, no data leaves your machine, and local models always bypass budget limits.
+
+```bash
+# Install Ollama (https://ollama.com)
+ollama pull gemma3
+
+# Configure zx to use it
+zx setup
+# > Select provider: Ollama
+# > Model: ollama_chat/gemma3
+```
+
+### Using Cloud Providers
+
+```bash
+# Set API key via environment variable
+export OPENROUTER_API_KEY="sk-or-..."
+
+# Or configure via setup wizard
+zx setup
+# > Select provider: OpenRouter
+# > API key: sk-or-...
+# > Model: openrouter/anthropic/claude-3.5-sonnet
+```
+
+---
+
+## Cost Tracking & Budgets
+
+zx tracks every AI call — tokens used, estimated cost, and which model was called. Usage is persisted to `~/.zx/usage.json` with per-model and daily breakdowns.
+
+### View Costs
+
+```bash
+# Show monthly summary with per-model and daily breakdown
+zx cost
+
+# Show a specific month
+zx cost 2026-03
+
+# Clear usage data for a month
+zx cost --reset
+```
+
+Example output:
+```
+March 2026: $1.2340 / $5.00 budget | 45,678 tokens | 89 calls
+
+Per-model breakdown:
+  gemini/gemini-2.0-flash-lite: $0.8012 | 30,000 tokens | 60 calls
+  openrouter/anthropic/claude-3.5-sonnet: $0.4328 | 15,678 tokens | 29 calls
+
+Recent daily usage:
+  2026-03-05: $0.1200 | 5,000 tokens | 10 calls
+  2026-03-04: $0.0800 | 3,200 tokens | 8 calls
+```
+
+### Set Budget Limits
+
+```bash
+# Set monthly spending limit
+zx budget --monthly 5.00
+
+# Set per-session limit
+zx budget --session 0.50
+
+# View current budget settings
+zx budget --show
+
+# Remove limits (set to 0)
+zx budget --monthly 0
+```
+
+**Budget behavior:**
+- Cloud providers are blocked when over budget
+- Local models (Ollama, vLLM) always bypass budget checks
+- Cost summary shown after every AI-powered command (configurable)
 
 ---
 
@@ -436,11 +545,17 @@ zx "prompt" --copy / -c              Copy to clipboard
 zx "prompt" --snapshot               Auto before/after snapshots
 zx --clean "prompt"                  Plain text mode
 
-zx setup                             Configure API key and preferences
+zx setup                             Configure providers, models, and budgets
 zx explain "command"                 Explain a command
 zx history [--clear]                 Browse or clear history
 zx last                              Show last command
 zx install <url>                     Install from URL
+
+zx cost [month]                      Show AI usage costs and breakdown
+zx cost --reset                      Clear usage data for a month
+zx budget --monthly <amount>         Set monthly spending limit
+zx budget --session <amount>         Set per-session spending limit
+zx budget --show                     Show current budget settings
 
 zx recipe --list                     List saved recipes
 zx recipe <name>                     Replay a recipe
@@ -498,9 +613,13 @@ zx setup
 ```
 
 Configures:
-- **Gemini API key** — required, validated on save
+- **AI Provider** — select from Gemini, OpenRouter, OpenAI, Anthropic, Ollama, vLLM, or custom
+- **API Key** — per-provider, validated on save
+- **Default Model** — e.g., `gemini/gemini-2.0-flash-lite`, `ollama_chat/gemma3`
+- **Monthly Budget** — spending limit ($0 = unlimited)
+- **Session Budget** — per-session spending limit ($0 = unlimited)
+- **Show Cost** — display cost summary after each AI-powered run
 - **Auto-approve** — skip confirmation for non-dangerous commands
-- **Model** — default `gemini-2.0-flash-lite` (fast and cost-effective)
 - **Clean mode** — persistent plain-text output
 - **Community opt-out** — disable anonymous success reporting for shared recipes
 
@@ -508,14 +627,18 @@ Configures:
 
 | Variable | Description |
 |----------|-------------|
-| `GEMINI_API_KEY` | Gemini API key (overrides config file) |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
 | `ZX_CLEAN` | Set to `1` to enable clean mode |
 
 ### Files
 
 | Path | Purpose |
 |------|---------|
-| `~/.zx/config.json` | API key, preferences, GitHub token |
+| `~/.zx/config.json` | Provider keys, model, budget, preferences |
+| `~/.zx/usage.json` | AI usage tracking (tokens, cost, per-model, daily) |
 | `~/.zx/history.json` | Command history (last 500) |
 | `~/.zx/last_plan.json` | Last executed plan (for undo) |
 | `~/.zx/recipes/` | Saved workflow recipes |
@@ -533,31 +656,35 @@ Configures:
 
 ```
 You: "set up a flask project"
-         │
-         ▼
-   ┌─────────────┐
-   │  System Recon │ ← detects OS, shell, installed tools, project type
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │  AI Planning  │ ← Gemini generates a step-by-step plan
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │ Risk Analysis │ ← each command scored SAFE → DANGEROUS
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │  You Approve  │ ← review plan table, approve/edit/cancel
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │   Execute     │ ← step by step with streaming output
-   └──────┬──────┘
-          ▼
-   ┌─────────────┐
-   │  Adapt/Undo   │ ← if a step fails, AI re-plans automatically
-   └─────────────┘
+         |
+         v
+   +---------------+
+   |  System Recon  | <-- detects OS, shell, installed tools, project type
+   +-------+-------+
+           v
+   +---------------+
+   |  AI Planning   | <-- LiteLLM dispatches to your chosen provider
+   +-------+-------+
+           v
+   +---------------+
+   | Risk Analysis  | <-- each command scored SAFE -> DANGEROUS
+   +-------+-------+
+           v
+   +---------------+
+   |  You Approve   | <-- review plan table, approve/edit/cancel
+   +-------+-------+
+           v
+   +---------------+
+   |   Execute      | <-- step by step with streaming output
+   +-------+-------+
+           v
+   +---------------+
+   |  Adapt/Undo    | <-- if a step fails, AI re-plans automatically
+   +-------+-------+
+           v
+   +---------------+
+   |  Cost Tracked  | <-- tokens, cost, model logged to usage.json
+   +---------------+
 ```
 
 ---
@@ -576,7 +703,7 @@ zx detects your environment and generates the right commands:
 ## Requirements
 
 - Python 3.10+
-- A [Google Gemini API key](https://aistudio.google.com/apikey) (free tier available)
+- An API key for your chosen provider, **or** a local model via [Ollama](https://ollama.com) (free, no key needed)
 
 ## License
 
