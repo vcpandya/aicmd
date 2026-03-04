@@ -385,13 +385,25 @@ def print_command(
 # ── Confirmation prompt ──────────────────────────────────────────────────────
 
 
-def confirm_execution(auto_approve: bool = False, is_dangerous: bool = False, is_supersafe: bool = False) -> str:
+def confirm_execution(
+    auto_approve: bool = False,
+    is_dangerous: bool = False,
+    is_supersafe: bool = False,
+    is_safe: bool = False,
+    plan_approved: bool = False,
+) -> str:
     """Returns: 'y' (execute), 'n' (skip), 'c' (copy), 'e' (edit/refine)"""
     if is_supersafe and not is_dangerous:
         if _clean_mode:
             print("  Auto-executing (supersafe)")
         else:
             console.print(f"  [{S_DIM}]{SYM_CHECK} Supersafe -- auto-executing[/]")
+        return "y"
+    if plan_approved and is_safe and not is_dangerous:
+        if _clean_mode:
+            print("  Auto-executing (safe, plan approved)")
+        else:
+            console.print(f"  [{S_DIM}]{SYM_CHECK} Safe -- auto-executing (plan approved)[/]")
         return "y"
     if auto_approve and not is_dangerous:
         if _clean_mode:
@@ -665,20 +677,60 @@ def print_history_table(entries: list[dict]) -> None:
 # ── Plan display ────────────────────────────────────────────────────────
 
 
+def _assign_phases(risk_labels: list[str]) -> list[str]:
+    """Derive EXPLORE / EXECUTE / VERIFY phases from risk classifications."""
+    n = len(risk_labels)
+    if n == 0:
+        return []
+    # Find last MODERATE/DANGEROUS step
+    last_modify = -1
+    for i, r in enumerate(risk_labels):
+        if r in ("MODERATE", "DANGEROUS"):
+            last_modify = i
+    phases = []
+    for i, r in enumerate(risk_labels):
+        if r in ("MODERATE", "DANGEROUS"):
+            phases.append("EXECUTE")
+        elif i > last_modify and last_modify >= 0:
+            phases.append("VERIFY")
+        else:
+            phases.append("EXPLORE")
+    return phases
+
+
+def print_phase_header(phase: str) -> None:
+    """Print a phase transition header (EXPLORE / EXECUTE / VERIFY)."""
+    _icons = {"EXPLORE": SYM_MAG, "EXECUTE": SYM_GEAR, "VERIFY": SYM_CHECK}
+    _colors = {"EXPLORE": "bright_cyan", "EXECUTE": "bright_yellow", "VERIFY": "bright_green"}
+    icon = _icons.get(phase, SYM_GEAR)
+    color = _colors.get(phase, "white")
+    if _clean_mode:
+        print(f"\n  === {icon} {phase} ===")
+        return
+    console.print()
+    console.print(Rule(f" [{color}]{icon} {phase}[/] ", style=color))
+
+
 def print_plan_table(plan, risk_labels: list[str]) -> None:
-    """Display the full execution plan as a rich table."""
+    """Display the execution plan as per-step cards grouped by phase."""
+    phases = _assign_phases(risk_labels)
+
     if _clean_mode:
         print(f"\n  Execution Plan: {plan.summary}\n")
-        print(f"  {'#':>3}  {'Risk':<10}  {'Undo':<5}  {'Command':<50}  {'Explanation'}")
-        print(f"  {'-'*3}  {'-'*10}  {'-'*5}  {'-'*50}  {'-'*30}")
-        for step, risk in zip(plan.steps, risk_labels):
-            undo = "Yes" if step.is_reversible else "No"
-            print(f"  {step.step_number:>3}  {risk:<10}  {undo:<5}  {step.command:<50}  {step.explanation}")
+        prev_phase = None
+        for step, risk, phase in zip(plan.steps, risk_labels, phases):
+            if phase != prev_phase:
+                print(f"\n  === {phase} ===")
+                prev_phase = phase
+            undo = " (Undo: Yes)" if step.is_reversible else ""
+            print(f"  [{step.step_number}] {risk:<10}| {step.command}")
+            print(f"      {step.explanation}{undo}")
         if plan.warnings:
             print(f"\n  WARNING: {plan.warnings}")
         print()
         return
 
+    # Rich mode — summary panel
     console.print()
     console.print(Panel(
         f"[bold bright_white]{plan.summary}[/]",
@@ -688,43 +740,40 @@ def print_plan_table(plan, risk_labels: list[str]) -> None:
         padding=(0, 2),
     ))
 
-    table = Table(
-        border_style="bright_cyan",
-        box=box.ROUNDED,
-        show_lines=True,
-        padding=(0, 1),
-        expand=True,
-    )
-    table.add_column("#", style="bold bright_magenta", width=4, justify="center")
-    table.add_column("Command", style="bright_green", ratio=3)
-    table.add_column("What it does", style="white", ratio=2)
-    table.add_column("Risk", width=12, justify="center")
-    table.add_column("Undo?", width=10, justify="center")
+    lexer = get_syntax_lexer()
+    prev_phase = None
 
-    for step, risk in zip(plan.steps, risk_labels):
+    for step, risk, phase in zip(plan.steps, risk_labels, phases):
+        # Phase header on transition
+        if phase != prev_phase:
+            print_phase_header(phase)
+            prev_phase = phase
+
+        # Risk badge + border color
         if risk == "SUPERSAFE":
-            risk_display = f"[bold green]{SYM_CHECK} AUTO[/]"
+            badge = f"[bold green]{SYM_CHECK} AUTO[/]"
+            border = "green"
         elif risk == "SAFE":
-            risk_display = f"[bold green]{SYM_SHIELD} SAFE[/]"
+            badge = f"[bold green]{SYM_SHIELD} SAFE[/]"
+            border = "green"
         elif risk == "MODERATE":
-            risk_display = f"[bold yellow]{SYM_WARN} MOD[/]"
+            badge = f"[bold yellow]{SYM_WARN} MODERATE[/]"
+            border = "yellow"
         else:
-            risk_display = f"[bold red]{SYM_SKULL} DANGER[/]"
+            badge = f"[bold red]{SYM_SKULL} DANGER[/]"
+            border = "red"
 
-        if step.is_reversible:
-            undo_display = f"[green]{SYM_UNDO} Yes[/]"
-        else:
-            undo_display = f"[red]{SYM_LOCK} No[/]"
+        undo_txt = f"  [green]{SYM_UNDO} Reversible[/]" if step.is_reversible else ""
 
-        table.add_row(
-            str(step.step_number),
-            step.command,
-            step.explanation,
-            risk_display,
-            undo_display,
-        )
-
-    console.print(table)
+        syntax = Syntax(step.command, lexer, theme="monokai", word_wrap=True, padding=1)
+        console.print(Panel(
+            syntax,
+            title=f"[bold bright_magenta]Step {step.step_number}[/]",
+            subtitle=f"[{S_DIM}]{SYM_BULB} {step.explanation}[/]{undo_txt}  {badge}",
+            border_style=border,
+            box=box.ROUNDED,
+            padding=(0, 0),
+        ))
 
     if plan.warnings:
         console.print(f"\n  [{S_WARN}]{SYM_WARN} {plan.warnings}[/]")

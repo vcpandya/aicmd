@@ -54,6 +54,7 @@ def run_plan_mode(
         print_success, print_error, print_warning,
         print_done, print_abort, prompt_refinement,
         print_plan_adaptation, print_info,
+        print_phase_header, _assign_phases,
         S_DIM, SYM_MAG, SYM_CHECK,
     )
     from .executor import execute_command
@@ -155,10 +156,20 @@ def run_plan_mode(
         current_steps=list(plan.steps),
     )
 
+    phases = _assign_phases(risk_labels)
+    prev_phase = None
+
     while not state.is_complete:
         step = state.current_step
         step_num = state.current_index + 1
         total = state.total_steps
+
+        # Show phase transition header
+        if state.current_index < len(phases):
+            phase = phases[state.current_index]
+            if phase != prev_phase:
+                print_phase_header(phase)
+                prev_phase = phase
 
         print_plan_progress(step_num, total, step.command)
 
@@ -173,6 +184,8 @@ def run_plan_mode(
             effective_auto,
             is_dangerous=(risk == "DANGEROUS"),
             is_supersafe=(risk == "SUPERSAFE" and not force_confirm),
+            is_safe=(risk == "SAFE" and not force_confirm),
+            plan_approved=True,
         )
 
         if step_choice == "n":
@@ -195,6 +208,9 @@ def run_plan_mode(
                 print_abort()
                 return
             state.current_steps = state.current_steps[:state.current_index] + adapted.revised_steps
+            risk_labels = [analyze_risk(s.command) for s in state.current_steps]
+            phases = _assign_phases(risk_labels)
+            prev_phase = None  # Reset so phase headers re-display
             print_plan_adaptation(adapted.assessment, len(adapted.revised_steps))
             continue
 
@@ -243,6 +259,9 @@ def run_plan_mode(
 
             print_plan_adaptation(adapted.assessment, len(adapted.revised_steps))
             state.current_steps = state.current_steps[:state.current_index + 1] + adapted.revised_steps
+            risk_labels = [analyze_risk(s.command) for s in state.current_steps]
+            phases = _assign_phases(risk_labels)
+            prev_phase = None
             state.current_index += 1
 
     _print_summary(state)
