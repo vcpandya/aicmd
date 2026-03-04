@@ -186,33 +186,31 @@ ENVIRONMENT:
 - Home Directory: {shell_info['home_dir']}
 - Project Context: {project_context}
 
-PLANNING STRATEGY — use a 3-phase approach:
+PLANNING STRATEGY:
 
-Phase 1: EXPLORE — Start the plan with discovery/diagnostic commands to understand the current system state:
-  - Check if required tools/runtimes are installed (e.g., python --version, node --version, git --version)
-  - List relevant files or directories (e.g., ls, dir, cat config files)
-  - Check environment (e.g., which python, echo $PATH, Get-Command)
-  - These are typically read-only, zero-risk commands.
+SIMPLE TASKS (navigation, listing, checking, single-command operations):
+  - Use exactly ONE step. Do NOT add exploration or verification steps.
+  - Examples of simple tasks: "go to directory X", "list files", "show date", "check python version"
+  - For "cd" or "go to" requests: return ONLY the cd command. Nothing else.
 
-Phase 2: EXECUTE — The actual work commands that accomplish the user's objective:
-  - Install dependencies, create files, run builds, etc.
-  - Order by dependency — prerequisites before dependents.
-
-Phase 3: VERIFY — End with verification commands to confirm the objective was achieved:
-  - Check that files were created, services are running, tests pass, etc.
-  - These should be read-only diagnostic commands.
+COMPLEX TASKS (multi-step installs, project setup, builds):
+  - Use a 3-phase approach:
+    Phase 1: EXPLORE — discovery/diagnostic commands (check tools, list files)
+    Phase 2: EXECUTE — actual work (install, create, build)
+    Phase 3: VERIFY — confirm objective was achieved
+  - Break complex operations into smaller steps.
 
 RULES:
 1. Return a JSON object with "summary", "steps", and "warnings" fields.
 2. Each step must have: "step_number", "command", "explanation", "is_reversible", "undo_command".
 3. Commands must be valid for the detected shell ({shell_info['shell']}).
-4. Prefer safe, incremental steps. Break complex operations into smaller commands.
-5. Mark is_reversible=true only if you can provide a concrete undo_command. Otherwise set undo_command to "".
-6. Do not include interactive commands (editors, prompts). Use non-interactive alternatives.
-7. Order steps so that dependencies come first.
-8. Use at most 15 steps. If more are needed, note this in warnings.
-9. If on PowerShell, do NOT use && to chain commands. Use ; instead.
-10. Always include at least one exploration step at the beginning and one verification step at the end."""
+4. Mark is_reversible=true only if you can provide a concrete undo_command. Otherwise set undo_command to "".
+5. Do not include interactive commands (editors, prompts). Use non-interactive alternatives.
+6. Order steps so that dependencies come first.
+7. Use at most 15 steps. If more are needed, note this in warnings.
+8. If on PowerShell, do NOT use && to chain commands. Use ; instead.
+9. MINIMIZE steps — use the fewest commands possible. Do NOT add unnecessary checks, verifications, or existence tests unless the task genuinely requires them.
+10. Never wrap a simple task in exploration/verification. One command is better than three."""
 
 
 def _build_adapt_prompt(shell_info: dict, project_context: str) -> str:

@@ -61,13 +61,15 @@ def run_plan_mode(
     from . import history
 
     effective_auto = auto_approve and not force_confirm
-
-    # ── Phase 0: Quick Recon — gather system state so AI makes better plans ──
     from .ui import print_info
-    with show_spinner("analyzing"):
-        recon_context = _gather_system_recon(execute_command)
-    if recon_context:
-        print_info(f"  [{S_DIM}]{SYM_MAG} Scanned system environment for smarter planning[/]")
+
+    # ── Phase 0: Quick Recon (skip for simple/short prompts) ──
+    recon_context = ""
+    if _needs_recon(prompt):
+        with show_spinner("analyzing"):
+            recon_context = _gather_system_recon(execute_command)
+        if recon_context:
+            print_info(f"  [{S_DIM}]{SYM_MAG} Scanned system environment for smarter planning[/]")
 
     enriched_prompt = prompt
     if recon_context:
@@ -76,11 +78,16 @@ def run_plan_mode(
         enriched_prompt = f"{enriched_prompt}\n\nStdin content:\n{stdin_context[:3000]}"
 
     # ── Phase 1: Generate Plan ──
-    with show_spinner("planning"):
+    with show_spinner("thinking"):
         plan = ai.generate_plan(enriched_prompt)
 
     if not plan.steps:
         print_success("No commands needed for this request.")
+        return
+
+    # ── Handle cd/directory commands — can't change parent shell ──
+    if len(plan.steps) == 1 and _is_cd_command(plan.steps[0].command):
+        _handle_cd_command(plan.steps[0].command, plan.steps[0].explanation)
         return
 
     risk_labels = [analyze_risk(step.command) for step in plan.steps]
@@ -88,6 +95,24 @@ def run_plan_mode(
     # Check if entire plan is supersafe — skip approval entirely
     all_supersafe = all(r == "SUPERSAFE" for r in risk_labels) and not force_confirm
     has_dangerous = "DANGEROUS" in risk_labels
+
+    # ── Fast path: single supersafe command — minimal output ──
+    if len(plan.steps) == 1 and all_supersafe:
+        step = plan.steps[0]
+        risk = risk_labels[0]
+        print_command(step.command, risk_label=risk, explanation=step.explanation)
+        print_output_header()
+        result = execute_command(
+            step.command,
+            on_stdout=lambda line: print_output_line(line),
+            on_stderr=lambda line: print_output_line(line, is_stderr=True),
+        )
+        history.add_entry(prompt, step.command, shell=ai.shell_info.get("shell", ""), success=result.success)
+        if result.success:
+            print_success(f"Done (exit code 0)")
+        else:
+            print_error(f"Failed (exit code {result.return_code})")
+        return
 
     if all_supersafe:
         # Supersafe plans execute without any interruption
@@ -397,3 +422,54 @@ def _gather_system_recon(execute_command) -> str:
             recon_lines.append(f"\nDisk info: {result.stdout.strip()}")
 
     return "\n".join(recon_lines) if recon_lines else ""
+
+
+# ── Simple-task detection helpers ────────────────────────────────────────────
+
+
+# Keywords that suggest the task is complex and needs system recon
+_COMPLEX_KEYWORDS = {
+    "install", "setup", "create", "build", "deploy", "configure", "compile",
+    "project", "database", "docker", "server", "migrate", "test", "ci",
+    "kubernetes", "nginx", "apache", "systemctl", "service",
+}
+
+
+def _needs_recon(prompt: str) -> bool:
+    """Heuristic: does this prompt need full system recon?
+
+    Short/simple prompts (navigate, list, check) skip recon entirely.
+    """
+    words = set(prompt.lower().split())
+    # Short prompts without complex keywords don't need recon
+    if len(prompt) < 80 and not words & _COMPLEX_KEYWORDS:
+        return False
+    return True
+
+
+def _is_cd_command(command: str) -> bool:
+    """Check if a command is a directory change (cd, Set-Location, pushd)."""
+    cmd = command.strip().lower()
+    return (
+        cmd.startswith("cd ") or cmd.startswith("cd\t")
+        or cmd.startswith("set-location ")
+        or cmd.startswith("pushd ")
+        or cmd == "cd"
+    )
+
+
+def _handle_cd_command(command: str, explanation: str) -> None:
+    """Handle cd commands — can't change parent shell, so offer alternatives."""
+    from .ui import print_command, print_info, print_warning
+
+    print_command(command, risk_label="SUPERSAFE", explanation=explanation)
+    print_warning(
+        "  'cd' runs in a subprocess and cannot change your shell's directory.\n"
+        "  Copy and paste the command above, or run it directly."
+    )
+    try:
+        import pyperclip
+        pyperclip.copy(command)
+        print_info("  (Copied to clipboard)")
+    except Exception:
+        pass

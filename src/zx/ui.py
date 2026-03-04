@@ -628,7 +628,7 @@ def print_history_table(entries: list[dict]) -> None:
     if _clean_mode:
         print("\n  Command History:")
         print(f"  {'#':>4}  {'Status':6}  {'Prompt':<40}  {'Command':<50}  {'When':<19}")
-        print(f"  {'─'*4}  {'─'*6}  {'─'*40}  {'─'*50}  {'─'*19}")
+        print(f"  {'-'*4}  {'-'*6}  {'-'*40}  {'-'*50}  {'-'*19}")
         for i, entry in enumerate(entries[-20:], 1):
             status = "OK" if entry.get("success", True) else "FAIL"
             print(f"  {i:>4}  {status:<6}  {entry.get('prompt', '')[:40]:<40}  {entry.get('command', '')[:50]:<50}  {entry.get('timestamp', '')[:19]}")
@@ -670,7 +670,7 @@ def print_plan_table(plan, risk_labels: list[str]) -> None:
     if _clean_mode:
         print(f"\n  Execution Plan: {plan.summary}\n")
         print(f"  {'#':>3}  {'Risk':<10}  {'Undo':<5}  {'Command':<50}  {'Explanation'}")
-        print(f"  {'─'*3}  {'─'*10}  {'─'*5}  {'─'*50}  {'─'*30}")
+        print(f"  {'-'*3}  {'-'*10}  {'-'*5}  {'-'*50}  {'-'*30}")
         for step, risk in zip(plan.steps, risk_labels):
             undo = "Yes" if step.is_reversible else "No"
             print(f"  {step.step_number:>3}  {risk:<10}  {undo:<5}  {step.command:<50}  {step.explanation}")
