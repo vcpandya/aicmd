@@ -151,6 +151,35 @@ def _detect_project_context() -> str:
 
 # ── Prompts ──────────────────────────────────────────────────────────────────
 
+_ZX_COMMANDS_REFERENCE = """Built-in zx commands (use these instead of shell commands when the request matches):
+- zx setup — configure providers, models, budgets
+- zx update — self-update package and refresh community index
+- zx explain "cmd" — explain a command
+- zx history — browse command history
+- zx last — show last command
+- zx install <url> — install from GitHub/URL
+- zx recipe --list/--save/--delete/explore — manage workflow recipes
+- zx playbook list/run/share — incident playbooks
+- zx undo — undo last plan
+- zx fix — diagnose/fix errors
+- zx alias suggest/list/add/install — shell alias generator
+- zx snapshot take/list/diff/show/delete — context snapshots
+- zx learn [topic] — interactive shell tutor
+- zx narrate "cmd" — live AI commentary
+- zx remote add/remove/list — remote execution via SSH
+- zx cost [month] — AI usage costs
+- zx budget --show/--monthly/--session — spending limits"""
+
+_ZX_ROUTING_EXAMPLES = """Self-referential routing:
+- "update yourself" / "check for updates" → zx update
+- "show my budget" / "spending limit" → zx budget --show
+- "show costs" / "how much spent" → zx cost
+- "save as recipe" → zx recipe --save <name>
+- "undo" / "undo last" → zx undo
+- "explain <cmd>" → zx explain "<cmd>"
+- "show history" → zx history
+- "configure" / "setup" → zx setup"""
+
 
 def _build_system_prompt(shell_info: dict, project_context: str) -> str:
     return f"""You are a command-line assistant. Your job is to convert natural language requests into exact terminal commands.
@@ -173,7 +202,12 @@ RULES:
 8. If the objective is FULLY COMPLETE, set "command" to "__DONE__", "is_done" to true.
 9. If a command fails, try a corrective command. If unrecoverable, return __DONE__.
 10. Never output dangerous commands (rm -rf /, format C:) without clear user intent.
-11. The "explanation" field should be a brief one-line description of what the command does."""
+11. The "explanation" field should be a brief one-line description of what the command does.
+
+ZX SELF-AWARENESS:
+You are running inside the "zx" CLI tool. If the user's request matches a built-in zx command, return that zx command instead of generating arbitrary shell commands.
+{_ZX_COMMANDS_REFERENCE}
+{_ZX_ROUTING_EXAMPLES}"""
 
 
 def _build_plan_prompt(shell_info: dict, project_context: str) -> str:
@@ -210,7 +244,12 @@ RULES:
 7. Use at most 15 steps. If more are needed, note this in warnings.
 8. If on PowerShell, do NOT use && to chain commands. Use ; instead.
 9. MINIMIZE steps — use the fewest commands possible. Do NOT add unnecessary checks, verifications, or existence tests unless the task genuinely requires them.
-10. Never wrap a simple task in exploration/verification. One command is better than three."""
+10. Never wrap a simple task in exploration/verification. One command is better than three.
+
+ZX SELF-AWARENESS:
+You are running inside the "zx" CLI tool. If the user's request maps to a built-in zx command, return a SINGLE-STEP plan with that zx command.
+{_ZX_COMMANDS_REFERENCE}
+{_ZX_ROUTING_EXAMPLES}"""
 
 
 def _build_adapt_prompt(shell_info: dict, project_context: str) -> str:

@@ -868,6 +868,76 @@ def budget_cmd(
         print_info(f"  Show cost after runs: {'yes' if config.show_cost else 'no'}")
 
 
+# ── Update command ───────────────────────────────────────────────────────────
+
+
+@app.command("update", help="Check for updates and refresh the community index.")
+def update_cmd():
+    import subprocess
+    import urllib.request
+    import json as _json
+
+    from .ui import print_banner, print_info, print_success, print_warning, print_error, show_spinner
+    from .community import fetch_community_index
+
+    print_banner()
+
+    # Step 1: Current version
+    current = __version__
+    print_info(f"  Current version: v{current}")
+
+    # Step 2: Check PyPI for latest
+    latest = None
+    try:
+        with show_spinner("checking"):
+            req = urllib.request.Request(
+                "https://pypi.org/pypi/zx-ai/json",
+                headers={"User-Agent": "zx-cli", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = _json.loads(resp.read().decode("utf-8"))
+                latest = data["info"]["version"]
+    except Exception:
+        print_warning("Could not check PyPI for updates.")
+
+    if latest:
+        print_info(f"  Latest version:  v{latest}")
+        current_tuple = tuple(int(x) for x in current.split("."))
+        latest_tuple = tuple(int(x) for x in latest.split("."))
+
+        if current_tuple < latest_tuple:
+            print_info(f"  Upgrading v{current} -> v{latest}...")
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--upgrade", "zx-ai"],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    print_success(f"Updated to v{latest}")
+                else:
+                    print_error(f"pip upgrade failed (exit code {result.returncode})")
+                    if result.stderr:
+                        print_info(f"  {result.stderr.strip()[:200]}")
+            except subprocess.TimeoutExpired:
+                print_error("pip upgrade timed out.")
+            except Exception as e:
+                print_error(f"Upgrade failed: {e}")
+        else:
+            print_success("Already on the latest version.")
+
+    # Step 3: Refresh community index
+    print_info("")
+    print_info("  Refreshing community index...")
+    try:
+        with show_spinner("refreshing"):
+            index = fetch_community_index(force_refresh=True)
+        recipe_count = len(index.get("recipes", []))
+        playbook_count = len(index.get("playbooks", []))
+        print_success(f"Community index refreshed ({recipe_count} recipes, {playbook_count} playbooks).")
+    except Exception:
+        print_warning("Could not refresh community index.")
+
+
 # ── Single-shot mode ─────────────────────────────────────────────────────────
 
 
