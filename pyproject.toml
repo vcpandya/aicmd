@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zx-ai"
+version = "0.1.0"
+description = "Natural language to terminal commands via AI. Supports 100+ providers via LiteLLM — Gemini, OpenRouter, Ollama, and more."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Vikram", email = "ceo@aeti.in" },
+]
+maintainers = [
+    { name = "Association for Emerging Technologies (AET)" },
+]
+keywords = ["cli", "ai", "gemini", "openrouter", "ollama", "litellm", "terminal", "natural-language", "command-line", "shell", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Shells",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "litellm>=1.40.0",
+    "pyperclip>=1.8.0",
+]
+
+[project.optional-dependencies]
+gemini = ["google-genai>=1.0.0"]
+all = ["google-genai>=1.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/vcpandya/aicmd"
+Repository = "https://github.com/vcpandya/aicmd"
+Issues = "https://github.com/vcpandya/aicmd/issues"
+
+[project.scripts]
+zx = "zx.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zx"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/zx", "README.md", "LICENSE"]
