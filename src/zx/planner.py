@@ -72,9 +72,22 @@ def run_plan_mode(
         if recon_context:
             print_info(f"  [{S_DIM}]{SYM_MAG} Scanned system environment for smarter planning[/]")
 
+    # ── Phase 0b: Web Search (if configured and useful) ──
+    search_context = ""
+    from .search import is_search_available, should_search, web_search, build_search_query
+    if is_search_available() and should_search(prompt):
+        with show_spinner("searching"):
+            query = build_search_query(prompt)
+            search_result = web_search(query)
+        if search_result.has_results:
+            search_context = search_result.raw_context
+            print_info(f"  [{S_DIM}]{SYM_MAG} Found {len(search_result.results)} web result(s) for context[/]")
+
     enriched_prompt = prompt
     if recon_context:
         enriched_prompt = f"{prompt}\n\nCURRENT SYSTEM STATE (auto-detected, use this to make a better plan):\n{recon_context}"
+    if search_context:
+        enriched_prompt = f"{enriched_prompt}\n\nWEB SEARCH CONTEXT (use this for up-to-date information):\n{search_context}"
     if stdin_context:
         enriched_prompt = f"{enriched_prompt}\n\nStdin content:\n{stdin_context[:3000]}"
 

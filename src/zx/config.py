@@ -38,6 +38,9 @@ class ZxConfig:
     provider_keys: dict = field(default_factory=dict)  # {"gemini": "...", "openrouter": "...", ...}
     api_base: str = ""                          # Custom API base URL (for vLLM, local models)
 
+    # Web search provider (jina / google / empty = disabled)
+    search_provider: str = ""
+
     # Budget controls
     monthly_budget: float = 0.0                 # $0 = unlimited
     session_budget: float = 0.0                 # $0 = unlimited
@@ -287,6 +290,73 @@ def run_setup() -> None:
         "[bold]Show cost summary after each run?[/]",
         default=config.show_cost,
     )
+
+    # ── Web search provider ───────────────────────────────────────────────
+    console.print()
+    console.print("[bold]Web Search Provider[/] [dim](enrich AI context with live web results)[/]")
+    console.print("  1. [cyan]Jina[/]    — s.jina.ai (JINA_API_KEY)")
+    console.print("  2. [cyan]Google[/]  — Custom Search API (GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_CX)")
+    console.print("  3. [dim]None[/]    — disabled")
+    console.print()
+
+    current_sp = config.search_provider or "none"
+    sp_default = {"jina": "1", "google": "2"}.get(current_sp, "3")
+    sp_input = Prompt.ask(
+        "[bold]Search provider[/]",
+        default=sp_default,
+    )
+
+    sp_map = {"1": "jina", "2": "google", "3": ""}
+    config.search_provider = sp_map.get(sp_input, "")
+
+    if config.search_provider == "jina":
+        current_jina = config.provider_keys.get("jina", "")
+        env_jina = os.environ.get("JINA_API_KEY", "").strip()
+        hint = ""
+        if current_jina:
+            hint = f" [dim](current: {current_jina[:8]}...)[/]"
+        elif env_jina:
+            hint = " [dim](found in JINA_API_KEY env var)[/]"
+
+        jina_key = Prompt.ask(
+            f"[bold]Jina API key{hint}[/] [dim]or set JINA_API_KEY[/]",
+            default=current_jina or env_jina or None,
+        )
+        if jina_key:
+            config.provider_keys["jina"] = jina_key
+            console.print("  [green]Saved Jina key[/]")
+
+    elif config.search_provider == "google":
+        current_gkey = config.provider_keys.get("google_search", "")
+        env_gkey = os.environ.get("GOOGLE_SEARCH_API_KEY", "").strip()
+        hint = ""
+        if current_gkey:
+            hint = f" [dim](current: {current_gkey[:8]}...)[/]"
+        elif env_gkey:
+            hint = " [dim](found in GOOGLE_SEARCH_API_KEY env var)[/]"
+
+        gkey = Prompt.ask(
+            f"[bold]Google Search API key{hint}[/] [dim]or set GOOGLE_SEARCH_API_KEY[/]",
+            default=current_gkey or env_gkey or None,
+        )
+        if gkey:
+            config.provider_keys["google_search"] = gkey
+
+        current_cx = config.provider_keys.get("google_search_cx", "")
+        env_cx = os.environ.get("GOOGLE_SEARCH_CX", "").strip()
+        cx_hint = ""
+        if current_cx:
+            cx_hint = f" [dim](current: {current_cx[:8]}...)[/]"
+        elif env_cx:
+            cx_hint = " [dim](found in GOOGLE_SEARCH_CX env var)[/]"
+
+        cx = Prompt.ask(
+            f"[bold]Google Custom Search CX{cx_hint}[/] [dim]or set GOOGLE_SEARCH_CX[/]",
+            default=current_cx or env_cx or None,
+        )
+        if cx:
+            config.provider_keys["google_search_cx"] = cx
+            console.print("  [green]Saved Google Search credentials[/]")
 
     # ── Community opt-out ──────────────────────────────────────────────────
     config.community_opt_out = Confirm.ask(
