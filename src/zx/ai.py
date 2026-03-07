@@ -222,6 +222,12 @@ ENVIRONMENT:
 
 PLANNING STRATEGY:
 
+INFORMATIONAL QUERIES (advice, best practices, explanations, "how to", "what is"):
+  - These are questions, NOT action requests. The user wants KNOWLEDGE, not commands.
+  - Put your full answer/advice in the "summary" field (use plain text, be thorough).
+  - Return ZERO steps. Do NOT generate demonstrative/example commands.
+  - Examples: "what are best practices for X", "explain how Y works", "what is the difference between A and B"
+
 SIMPLE TASKS (navigation, listing, checking, single-command operations):
   - Use exactly ONE step. Do NOT add exploration or verification steps.
   - Examples of simple tasks: "go to directory X", "list files", "show date", "check python version"

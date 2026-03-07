@@ -96,7 +96,13 @@ def run_plan_mode(
         plan = ai.generate_plan(enriched_prompt)
 
     if not plan.steps:
-        print_success("No commands needed for this request.")
+        if plan.summary:
+            from .ui import console
+            console.print()
+            console.print(f"  {plan.summary}")
+            console.print()
+        else:
+            print_success("No commands needed for this request.")
         return
 
     # ── Handle cd/directory commands — can't change parent shell ──
