@@ -166,6 +166,11 @@ def run_plan_mode(
         history.add_entry(prompt, step.command, shell=ai.shell_info.get("shell", ""), success=result.success)
         if result.success:
             print_success(f"Done (exit code 0)")
+            # Synthesize answer if command produced output
+            if result.stdout.strip():
+                _summarize_if_needed(ai, prompt, [
+                    {"command": step.command, "return_code": 0, "stdout": result.stdout[:2000]},
+                ])
         else:
             print_error(f"Failed (exit code {result.return_code})")
         return
@@ -353,16 +358,7 @@ def run_plan_mode(
     all_ok = all(cs.get("return_code", 0) == 0 for cs in state.completed_steps)
     has_output = any(cs.get("stdout", "").strip() for cs in state.completed_steps)
     if all_ok and has_output and state.completed_steps:
-        try:
-            with show_spinner("summarizing"):
-                answer = ai.summarize_findings(prompt, state.completed_steps)
-            if answer:
-                from .ui import console
-                console.print()
-                console.print(f"  [bold]Answer:[/] {answer}")
-                console.print()
-        except Exception:
-            pass  # Summary failure is non-fatal
+        _summarize_if_needed(ai, prompt, state.completed_steps)
 
     # Save last plan for undo support
     _save_plan_for_undo(state)
@@ -597,6 +593,41 @@ def _needs_recon(prompt: str) -> bool:
     if len(prompt) < 80 and not words & _COMPLEX_KEYWORDS:
         return False
     return True
+
+
+def _needs_summary(prompt: str) -> bool:
+    """Heuristic: does this prompt warrant a synthesized answer?
+
+    Questions and exploration prompts get summaries.
+    Simple action prompts (version, list, run) don't — the output speaks for itself.
+    """
+    lower = prompt.lower().strip()
+    # Questions need answers
+    if "?" in prompt or lower.startswith(("what", "why", "how", "which", "where", "who", "explain", "describe", "tell me", "show me about")):
+        return True
+    # "about" implies wanting understanding, not just raw output
+    if " about " in lower or lower.endswith(" about"):
+        return True
+    # Short action prompts don't need summaries
+    if len(prompt.split()) <= 3:
+        return False
+    return False
+
+
+def _summarize_if_needed(ai: AIClient, prompt: str, completed_steps: list) -> None:
+    """Synthesize command outputs into a human-readable answer, if appropriate."""
+    if not _needs_summary(prompt):
+        return
+    from .ui import show_spinner, console
+    try:
+        with show_spinner("summarizing"):
+            answer = ai.summarize_findings(prompt, completed_steps)
+        if answer:
+            console.print()
+            console.print(f"  [bold]Answer:[/] {answer}")
+            console.print()
+    except Exception:
+        pass  # Summary failure is non-fatal
 
 
 def _is_cd_command(command: str) -> bool:

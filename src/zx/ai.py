@@ -192,6 +192,7 @@ _ZX_COMMANDS_REFERENCE = """Built-in zx commands (use these instead of shell com
 - zx budget --show/--monthly/--session — spending limits"""
 
 _ZX_ROUTING_EXAMPLES = """Self-referential routing:
+- "version" / "what version" / "zx version" → zx --version
 - "update yourself" / "check for updates" → zx update
 - "show my budget" / "spending limit" → zx budget --show
 - "show costs" / "how much spent" → zx cost

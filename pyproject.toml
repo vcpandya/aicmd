@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zx-ai"
-version = "0.1.6"
+version = "0.1.7"
 description = "Natural language to terminal commands via AI. Supports 100+ providers via LiteLLM — Gemini, OpenRouter, Ollama, and more."
 readme = "README.md"
 license = "MIT"
