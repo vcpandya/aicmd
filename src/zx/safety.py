@@ -131,6 +131,13 @@ def analyze_risk(command: str) -> str:
         if pattern.search(cmd):
             return "DANGEROUS"
 
+    # Check moderate BEFORE supersafe — chained commands like
+    # "echo hello > file" or "ls && rm file" must not be classified
+    # as supersafe just because the first token matches.
+    for pattern in _MODERATE_PATTERNS:
+        if pattern.search(cmd):
+            return "MODERATE"
+
     # Check supersafe (trivial read-only, zero friction)
     for pattern in _SUPERSAFE_PATTERNS:
         if pattern.search(cmd):
@@ -140,11 +147,6 @@ def analyze_risk(command: str) -> str:
     for pattern in _SAFE_PATTERNS:
         if pattern.search(cmd):
             return "SAFE"
-
-    # Check moderate patterns
-    for pattern in _MODERATE_PATTERNS:
-        if pattern.search(cmd):
-            return "MODERATE"
 
     # Default: moderate for unknown commands
     return "MODERATE"

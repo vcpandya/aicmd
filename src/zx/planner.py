@@ -67,21 +67,27 @@ def run_plan_mode(
     # ── Phase 0: Quick Recon (skip for simple/short prompts) ──
     recon_context = ""
     if _needs_recon(prompt):
-        with show_spinner("analyzing"):
-            recon_context = _gather_system_recon(execute_command)
-        if recon_context:
-            print_info(f"  [{S_DIM}]{SYM_MAG} Scanned system environment for smarter planning[/]")
+        try:
+            with show_spinner("analyzing"):
+                recon_context = _gather_system_recon(execute_command)
+            if recon_context:
+                print_info(f"  [{S_DIM}]{SYM_MAG} Scanned system environment for smarter planning[/]")
+        except Exception:
+            pass  # Recon failure is non-fatal
 
     # ── Phase 0b: Web Search (if configured and useful) ──
     search_context = ""
-    from .search import is_search_available, should_search, web_search, build_search_query
-    if is_search_available() and should_search(prompt):
-        with show_spinner("searching"):
-            query = build_search_query(prompt)
-            search_result = web_search(query)
-        if search_result.has_results:
-            search_context = search_result.raw_context
-            print_info(f"  [{S_DIM}]{SYM_MAG} Found {len(search_result.results)} web result(s) for context[/]")
+    try:
+        from .search import is_search_available, should_search, web_search, build_search_query
+        if is_search_available() and should_search(prompt):
+            with show_spinner("searching"):
+                query = build_search_query(prompt)
+                search_result = web_search(query)
+            if search_result.has_results:
+                search_context = search_result.raw_context
+                print_info(f"  [{S_DIM}]{SYM_MAG} Found {len(search_result.results)} web result(s) for context[/]")
+    except Exception:
+        pass  # Search failure is non-fatal
 
     enriched_prompt = prompt
     if recon_context:
@@ -112,8 +118,12 @@ def run_plan_mode(
 
     risk_labels = [analyze_risk(step.command) for step in plan.steps]
 
-    # Check if entire plan is supersafe — skip approval entirely
-    all_supersafe = all(r == "SUPERSAFE" for r in risk_labels) and not force_confirm
+    # Check if entire plan is supersafe — skip approval for small plans (≤3 steps)
+    all_supersafe = (
+        all(r == "SUPERSAFE" for r in risk_labels)
+        and len(plan.steps) <= 3
+        and not force_confirm
+    )
     has_dangerous = "DANGEROUS" in risk_labels
 
     # ── Fast path: single supersafe command — minimal output ──
@@ -258,6 +268,34 @@ def run_plan_mode(
 
         if result.success:
             print_success(f"Step {step_num}/{total} done (exit code 0)")
+
+            # Output-aware adaptation: if this is an explore-phase step with
+            # meaningful output, let the AI re-evaluate remaining steps based
+            # on what was discovered (e.g., version mismatch, missing files).
+            remaining = state.remaining_steps
+            if (
+                remaining
+                and state.current_index < len(phases)
+                and phases[state.current_index] == "EXPLORE"
+                and result.stdout.strip()
+            ):
+                try:
+                    with show_spinner("adapting"):
+                        adapted = ai.adapt_plan(
+                            original_objective=prompt,
+                            completed_steps=state.completed_steps,
+                            failed_step=step_record,  # not failed, but carries output
+                            remaining_steps=[s.model_dump() for s in remaining],
+                        )
+                    if adapted.revised_steps and not adapted.should_abort:
+                        state.current_steps = state.current_steps[:state.current_index + 1] + adapted.revised_steps
+                        risk_labels = [analyze_risk(s.command) for s in state.current_steps]
+                        phases = _assign_phases(risk_labels)
+                        prev_phase = None
+                        print_plan_adaptation(adapted.assessment, len(adapted.revised_steps))
+                except Exception:
+                    pass  # Adaptation failure is non-fatal, continue with original plan
+
             state.current_index += 1
         else:
             print_error(f"Step {step_num}/{total} failed (exit code {result.return_code})")
