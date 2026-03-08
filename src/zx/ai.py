@@ -45,6 +45,14 @@ class CommandResponse(BaseModel):
     is_done: bool  # True if the objective is fully complete
 
 
+class ChatResponse(BaseModel):
+    """Structured response for interactive chat mode."""
+    type: str         # "command" | "question" | "answer" | "done"
+    command: str      # Shell command (when type=command), empty otherwise
+    message: str      # Explanation, answer text, or clarifying question
+    is_dangerous: bool  # True if command is potentially destructive
+
+
 class ExplainResponse(BaseModel):
     """Structured response for command explanation."""
     summary: str  # One-line summary of what the command does
@@ -453,6 +461,30 @@ def _parse_adapt_response(text: str) -> PlanAdaptResponse:
         )
 
 
+def _parse_chat_response(text: str) -> ChatResponse:
+    """Parse interactive chat response with fallback."""
+    text = text.strip()
+    try:
+        if text.startswith("```"):
+            lines = text.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            text = "\n".join(lines).strip()
+
+        data = json.loads(text)
+        resp_type = _coerce_str(data.get("type", "answer"))
+        if resp_type not in ("command", "question", "answer", "done"):
+            resp_type = "answer"
+        return ChatResponse(
+            type=resp_type,
+            command=_clean_command(_coerce_str(data.get("command", ""))) if resp_type == "command" else "",
+            message=_coerce_str(data.get("message", "") or data.get("explanation", "")),
+            is_dangerous=bool(data.get("is_dangerous", False)),
+        )
+    except (json.JSONDecodeError, TypeError, KeyError):
+        # Fallback: treat as plain text answer
+        return ChatResponse(type="answer", command="", message=text, is_dangerous=False)
+
+
 def _is_retryable_schema_error(e: Exception) -> bool:
     """Check if an API error is likely schema-related (worth retrying without schema)."""
     msg = str(e).lower()
@@ -793,6 +825,86 @@ Analyze the failure and provide revised steps to complete the objective, or reco
             return _parse_command_response(text)
         except Exception as e:
             self._handle_api_error(e)
+
+    def start_interactive_chat(self, initial_prompt: str = "", stdin_context: str = "") -> None:
+        """Initialize interactive chat with a conversational system prompt."""
+        system = f"""You are an interactive command-line assistant having a conversation with the user. You help them accomplish tasks on their system.
+
+ENVIRONMENT:
+- OS: {self.shell_info['os_name']} {self.shell_info['os_version']}
+- Shell: {self.shell_info['shell']}
+- CWD: {self.shell_info['cwd']}
+- Home: {self.shell_info['home_dir']}
+- Project: {self.project_context}
+
+RESPONSE FORMAT:
+Return JSON: {{"type": "<type>", "command": "<cmd>", "message": "<text>", "is_dangerous": false}}
+
+RESPONSE TYPES — choose the most appropriate for each turn:
+
+- "question": You need more information from the user before proceeding. Set "message" to your clarifying question. Ask focused, specific questions — not vague ones. Examples: "Which Python version — 3.10 or 3.11?", "Should I install globally or in a virtualenv?"
+
+- "command": You have enough context to run a command. Set "command" to the exact shell command and "message" to a brief explanation. Set is_dangerous=true for destructive operations.
+
+- "answer": You're providing information, a summary, or explaining something. No command needed. Set "message" to your response.
+
+- "done": The task is complete or the user wants to end. Set "message" to a brief summary of what was accomplished.
+
+BEHAVIOR:
+- When the user's request is unclear or could go multiple ways, ASK first. Don't guess.
+- When you have enough context, propose a command. Don't over-ask.
+- After a command executes, you'll receive its output. Analyze it and decide the next action.
+- Be conversational but concise. No filler.
+- Commands must be valid for {self.shell_info['shell']}. On PowerShell, use `;` not `&&`.
+- You can reference previous conversation context. Build on what you've learned.
+
+ZX SELF-AWARENESS:
+{_ZX_COMMANDS_REFERENCE}"""
+        if stdin_context:
+            system += f"\n\nPiped stdin context:\n{stdin_context[:3000]}"
+
+        self._chat_history = [{"role": "system", "content": system}]
+        if initial_prompt:
+            self._chat_history.append({"role": "user", "content": initial_prompt})
+
+    def chat_interactive_send(self, message: str = "") -> ChatResponse:
+        """Send a message in interactive chat and get a typed response."""
+        if message:
+            self._chat_history.append({"role": "user", "content": message})
+
+        try:
+            text = self._call_llm(
+                messages=self._chat_history,
+                temperature=0.2,
+                max_tokens=2000,
+                response_schema=ChatResponse,
+                method_name="chat_interactive",
+            )
+            self._chat_history.append({"role": "assistant", "content": text})
+            return _parse_chat_response(text)
+        except Exception as e:
+            if _is_retryable_schema_error(e):
+                try:
+                    text = self._call_llm(
+                        messages=self._chat_history,
+                        temperature=0.2,
+                        max_tokens=2000,
+                        method_name="chat_interactive",
+                    )
+                    self._chat_history.append({"role": "assistant", "content": text})
+                    return _parse_chat_response(text)
+                except Exception as e2:
+                    self._handle_api_error(e2)
+            self._handle_api_error(e)
+
+    def add_command_result(self, command: str, stdout: str, stderr: str, return_code: int) -> None:
+        """Feed command execution results back into the chat history."""
+        result_msg = f"Command executed: {command}\nExit code: {return_code}"
+        if stdout.strip():
+            result_msg += f"\n\nOutput:\n{stdout[:3000]}"
+        if stderr.strip():
+            result_msg += f"\n\nStderr:\n{stderr[:1000]}"
+        self._chat_history.append({"role": "user", "content": result_msg})
 
     def diagnose_failure(self, error_output: str, failed_command: str = "", system_context: str = "") -> DiagnosisResponse:
         """Diagnose a command failure and suggest a fix."""

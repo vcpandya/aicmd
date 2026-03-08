@@ -170,6 +170,165 @@ def run_cmd(
             print_info(f"  {line}")
 
 
+# ── Chat command ─────────────────────────────────────────────────────────────
+
+
+@app.command("chat", help="Interactive conversational mode — AI asks questions, runs commands, and adapts.")
+def chat_cmd(
+    prompt: Annotated[
+        Optional[str],
+        typer.Argument(help="Optional starting prompt (or just start chatting)."),
+    ] = None,
+):
+    from .config import ZxConfig, get_provider_config
+    from .ai import AIClient
+    from .ui import (
+        print_banner, print_command, print_output_header, print_output_line,
+        print_success, print_error, print_warning, print_info,
+        show_spinner, console, confirm_execution,
+    )
+    from .ui import SYM_BRAIN, SYM_GEAR, SYM_BOLT, S_AI, S_DIM
+    from .executor import execute_command
+    from .safety import analyze_risk
+    from . import history
+
+    print_banner()
+
+    config = ZxConfig.load()
+    provider_cfg = get_provider_config(config.model)
+    ai = AIClient(api_key=provider_cfg["api_key"], model=config.model, config=config)
+
+    # Check for piped stdin
+    stdin_context = ""
+    if not sys.stdin.isatty():
+        stdin_context = sys.stdin.read()[:10000]
+
+    # Initialize chat
+    initial = prompt or ""
+    ai.start_interactive_chat(initial_prompt=initial, stdin_context=stdin_context)
+
+    console.print()
+    if not initial:
+        console.print(f"  [{S_AI}]{SYM_BRAIN} Chat mode[/] — describe what you need. Type [bold]quit[/] or [bold]exit[/] to end.")
+        console.print()
+
+    # If we have an initial prompt, get the first response
+    if initial:
+        console.print(f"  [{S_DIM}]You: {initial}[/]")
+        console.print()
+        with show_spinner("thinking"):
+            response = ai.chat_interactive_send()
+    else:
+        response = None
+
+    while True:
+        # If no response yet (first loop without initial prompt), get user input
+        if response is None:
+            try:
+                user_input = console.input(f"  [{S_AI}]{SYM_BOLT}[/] [bold]You:[/] ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print()
+                print_info(f"  [{S_DIM}]Chat ended.[/]")
+                break
+
+            if not user_input:
+                continue
+            if user_input.lower() in ("quit", "exit", "bye", "q"):
+                print_info(f"  [{S_DIM}]Chat ended.[/]")
+                break
+
+            with show_spinner("thinking"):
+                response = ai.chat_interactive_send(user_input)
+
+        # Handle the response
+        if response.type == "question":
+            console.print(f"  [{S_AI}]{SYM_BRAIN}[/] {response.message}")
+            console.print()
+            response = None  # Next loop will get user input
+            continue
+
+        elif response.type == "answer":
+            console.print(f"  [{S_AI}]{SYM_BRAIN}[/] {response.message}")
+            console.print()
+            response = None
+            continue
+
+        elif response.type == "command":
+            risk = analyze_risk(response.command)
+            print_command(response.command, risk_label=risk, explanation=response.message)
+
+            choice = confirm_execution(
+                auto_approve=config.auto_approve,
+                is_dangerous=(risk == "DANGEROUS" or response.is_dangerous),
+                is_supersafe=(risk == "SUPERSAFE"),
+            )
+
+            if choice == "n":
+                ai.add_command_result(response.command, "", "User skipped this command.", -1)
+                print_warning("  Skipped. Tell me what to do instead.")
+                console.print()
+                response = None
+                continue
+            elif choice == "c":
+                _copy_to_clipboard(response.command)
+                response = None
+                continue
+            elif choice == "e":
+                from .ui import prompt_refinement
+                refinement = prompt_refinement()
+                with show_spinner("thinking"):
+                    response = ai.chat_interactive_send(f"User wants to adjust: {refinement}")
+                continue
+
+            # Execute the command
+            print_output_header()
+            result = execute_command(
+                response.command,
+                on_stdout=lambda line: print_output_line(line),
+                on_stderr=lambda line: print_output_line(line, is_stderr=True),
+            )
+
+            history.add_entry(
+                prompt or "chat", response.command,
+                shell=ai.shell_info.get("shell", ""),
+                success=result.success,
+            )
+
+            if result.success:
+                print_success(f"Done (exit code 0)")
+            else:
+                print_error(f"Failed (exit code {result.return_code})")
+
+            # Feed result back to AI for next step
+            ai.add_command_result(
+                response.command, result.stdout, result.stderr, result.return_code,
+            )
+            console.print()
+
+            # Get AI's next response based on the output
+            with show_spinner("thinking"):
+                response = ai.chat_interactive_send()
+            continue
+
+        elif response.type == "done":
+            console.print(f"  [{S_AI}]{SYM_BRAIN}[/] {response.message}")
+            console.print()
+            response = None
+            continue
+
+        else:
+            # Unknown type, treat as answer
+            console.print(f"  [{S_AI}]{SYM_BRAIN}[/] {response.message}")
+            console.print()
+            response = None
+            continue
+
+    # Show cost summary
+    if ai.cost_tracker.session_records and config.show_cost:
+        from .ui import print_cost_summary
+        print_cost_summary(ai.cost_tracker.get_session_summary())
+
+
 # ── Setup command ────────────────────────────────────────────────────────────
 
 
