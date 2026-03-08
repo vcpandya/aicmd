@@ -119,6 +119,11 @@ def run_cmd(
 
     print_banner()
 
+    # Validate prompt
+    if not prompt.strip():
+        print_error("Prompt cannot be empty. Example: zx \"list all python files\"")
+        raise typer.Exit(1)
+
     # Auto-snapshot: take "before" snapshot
     before_snap = None
     if snapshot:

@@ -72,6 +72,12 @@ class ZxConfig:
 
                 return config
             except (json.JSONDecodeError, TypeError):
+                import sys
+                print(
+                    f"Warning: Config file {CONFIG_FILE} is corrupted. Using defaults. "
+                    "Run 'zx setup' to reconfigure.",
+                    file=sys.stderr,
+                )
                 return cls()
         return cls()
 
@@ -176,6 +182,7 @@ def run_setup() -> None:
     for num in selected:
         provider = provider_map.get(num)
         if not provider:
+            console.print(f"  [yellow]Skipping unknown option '{num}' (valid: 1-6)[/]")
             continue
 
         if provider in LOCAL_PROVIDERS or provider == "ollama":
@@ -269,20 +276,26 @@ def run_setup() -> None:
     console.print("[bold]Budget Controls[/] [dim](prevent surprise bills, $0 = unlimited)[/]")
 
     monthly_str = Prompt.ask(
-        "[bold]Monthly spending limit ($)[/]",
+        "[bold]Monthly spending limit ($)[/] [dim](0 = unlimited)[/]",
         default=str(config.monthly_budget) if config.monthly_budget > 0 else "0",
     )
     try:
-        config.monthly_budget = float(monthly_str)
+        val = float(monthly_str)
+        config.monthly_budget = max(val, 0.0)
+        if val < 0:
+            console.print("  [yellow]Negative value ignored, set to unlimited (0)[/]")
     except ValueError:
         config.monthly_budget = 0.0
 
     session_str = Prompt.ask(
-        "[bold]Per-session spending limit ($)[/]",
+        "[bold]Per-session spending limit ($)[/] [dim](0 = unlimited)[/]",
         default=str(config.session_budget) if config.session_budget > 0 else "0",
     )
     try:
-        config.session_budget = float(session_str)
+        val = float(session_str)
+        config.session_budget = max(val, 0.0)
+        if val < 0:
+            console.print("  [yellow]Negative value ignored, set to unlimited (0)[/]")
     except ValueError:
         config.session_budget = 0.0
 

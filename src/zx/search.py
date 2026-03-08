@@ -89,7 +89,7 @@ def search_jina(query: str, api_key: str, max_results: int = 5) -> SearchRespons
         snippet = item.get("description", "") or item.get("content", "")[:300]
 
         results.append(SearchResult(title=title, url=link, snippet=snippet))
-        raw_lines.append(f"- {title}\n  {snippet[:200]}")
+        raw_lines.append(f"- {title}\n  {snippet[:300]}")
 
     raw_context = f"Web search results for '{query}':\n" + "\n".join(raw_lines) if raw_lines else ""
     return SearchResponse(query=query, results=results, raw_context=raw_context)
@@ -128,7 +128,7 @@ def search_google(query: str, api_key: str, cx: str, max_results: int = 5) -> Se
         snippet = item.get("snippet", "")
 
         results.append(SearchResult(title=title, url=link, snippet=snippet))
-        raw_lines.append(f"- {title}\n  {snippet[:200]}")
+        raw_lines.append(f"- {title}\n  {snippet[:300]}")
 
     raw_context = f"Web search results for '{query}':\n" + "\n".join(raw_lines) if raw_lines else ""
     return SearchResponse(query=query, results=results, raw_context=raw_context)
@@ -175,6 +175,13 @@ _SEARCH_KEYWORDS = {
     "troubleshoot", "workaround",
     "alternative", "compare", "versus",
     "official", "guide",
+    "deprecated", "compatibility", "migration",
+}
+
+# Prompts about zx itself or local-only operations should NOT trigger search
+_SEARCH_EXCLUDE = {
+    "recipe", "playbook", "snapshot", "alias", "undo",
+    "history", "budget", "cost", "narrate",
 }
 
 
@@ -187,6 +194,14 @@ def should_search(prompt: str) -> bool:
     lower = prompt.lower()
     words = set(lower.split())
 
+    # Skip search for zx-internal / local-only operations
+    if words & _SEARCH_EXCLUDE:
+        return False
+
+    # Skip very short prompts (too vague for useful search)
+    if len(prompt) < 15:
+        return False
+
     # Check for search-worthy single keywords
     if words & _SEARCH_KEYWORDS:
         return True
@@ -196,6 +211,8 @@ def should_search(prompt: str) -> bool:
         "how to", "how do", "best way", "what is the latest",
         "is there a", "where can i", "what version",
         "latest version", "current version",
+        "version mismatch", "breaking change",
+        "release notes", "what's new",
     ]
     for phrase in search_phrases:
         if phrase in lower:

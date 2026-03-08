@@ -433,10 +433,14 @@ def confirm_execution(
 
 
 def prompt_refinement() -> str:
-    if _clean_mode:
-        return input("  How should I adjust? ").strip()
-    console.print()
-    return Prompt.ask(f"  [{S_AI}]{SYM_BRAIN} Tell me how to adjust[/]")
+    while True:
+        if _clean_mode:
+            result = input("  How should I adjust? (e.g., 'use verbose mode', 'add timeout'): ").strip()
+        else:
+            console.print()
+            result = Prompt.ask(f"  [{S_AI}]{SYM_BRAIN} How should I adjust? [dim](e.g., 'use verbose mode')[/]").strip()
+        if result:
+            return result
 
 
 # ── Spinners with witty messages ─────────────────────────────────────────────

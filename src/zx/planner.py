@@ -69,7 +69,7 @@ def run_plan_mode(
     if _needs_recon(prompt):
         try:
             with show_spinner("analyzing"):
-                recon_context = _gather_system_recon(execute_command)
+                recon_context = _gather_system_recon(execute_command, prompt)
             if recon_context:
                 print_info(f"  [{S_DIM}]{SYM_MAG} Scanned system environment for smarter planning[/]")
         except Exception:
@@ -326,6 +326,13 @@ def run_plan_mode(
     # Save last plan for undo support
     _save_plan_for_undo(state)
 
+    # Show undo hint if any steps modified state
+    has_reversible = any(
+        s.is_reversible for s in state.current_steps[:len(state.completed_steps)]
+    )
+    if has_reversible and state.completed_steps:
+        print_info(f"  [{S_DIM}]Tip: run 'zx undo' to revert these changes[/]")
+
     # Offer to save as recipe if plan was successful
     all_ok = all(cs.get("return_code", 0) == 0 for cs in state.completed_steps)
     if all_ok and state.completed_steps:
@@ -436,14 +443,16 @@ def _copy_to_clipboard(command: str):
         print_warning(f"Could not copy to clipboard. Command: {command}")
 
 
-def _gather_system_recon(execute_command) -> str:
+def _gather_system_recon(execute_command, prompt: str = "") -> str:
     """Run quick, silent diagnostic commands to gather system state for smarter planning.
 
+    Only checks tools relevant to the prompt to keep recon fast.
     Returns a text summary of what was discovered. All commands are read-only and safe.
     """
     import platform
     import os
 
+    prompt_lower = prompt.lower()
     recon_lines = []
 
     # Directory listing (top-level only, quick)
@@ -457,8 +466,8 @@ def _gather_system_recon(execute_command) -> str:
         if len(lines) > 30:
             recon_lines.append(f"  ... and {len(lines) - 30} more")
 
-    # Check common runtimes (run in parallel would be ideal but keep it simple)
-    checks = {
+    # Check common runtimes — only those relevant to the prompt
+    all_checks = {
         "python": "python --version",
         "node": "node --version",
         "git": "git --version",
@@ -469,6 +478,32 @@ def _gather_system_recon(execute_command) -> str:
         "go": "go version",
         "java": "java -version",
     }
+
+    # Map prompt keywords to relevant tools
+    _TOOL_KEYWORDS = {
+        "python": {"python", "pip", "django", "flask", "fastapi", "venv", "conda", "pytest", "pyproject"},
+        "node": {"node", "npm", "yarn", "react", "next", "express", "typescript", "webpack", "vite"},
+        "git": {"git", "commit", "push", "pull", "branch", "merge", "clone", "repo"},
+        "docker": {"docker", "container", "image", "compose", "kubernetes", "k8s"},
+        "npm": {"npm", "node", "yarn", "package.json", "react", "next", "express"},
+        "pip": {"pip", "python", "pypi", "package", "install"},
+        "cargo": {"cargo", "rust", "rustc", "crate"},
+        "go": {"go", "golang", "mod"},
+        "java": {"java", "maven", "gradle", "spring", "jar", "jvm"},
+    }
+
+    prompt_words = set(prompt_lower.split())
+
+    # Always check git (very common), plus tools matching prompt keywords
+    checks = {"git": all_checks["git"]}
+    for tool, keywords in _TOOL_KEYWORDS.items():
+        if keywords & prompt_words:
+            checks[tool] = all_checks[tool]
+
+    # If no specific tools matched, check the 4 most common ones
+    if len(checks) <= 1:
+        for tool in ("python", "node", "docker", "pip"):
+            checks[tool] = all_checks[tool]
 
     installed = []
     for name, cmd in checks.items():

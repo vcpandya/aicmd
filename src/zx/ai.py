@@ -91,9 +91,16 @@ class RecipeParameterization(BaseModel):
     parameterized_commands: list[str]    # commands with {{param}} placeholders
 
 
+class AliasEntry(BaseModel):
+    """A single alias suggestion."""
+    name: str
+    command: str
+    reason: str
+
+
 class AliasSuggestion(BaseModel):
     """AI response for alias suggestions."""
-    aliases: list[dict]  # [{"name": ..., "command": ..., "reason": ...}]
+    aliases: list[AliasEntry]
 
 
 class LessonResponse(BaseModel):
@@ -283,16 +290,17 @@ Return JSON: {{"assessment": "<what happened and why>", "revised_steps": [...], 
 
 
 def _build_explain_prompt(shell_info: dict) -> str:
-    return f"""You are a command-line educator. Explain terminal commands clearly.
+    return f"""You are a command-line educator. Explain terminal commands clearly for someone learning the shell.
 
 ENVIRONMENT:
-- Operating System: {shell_info['os_name']}
+- OS: {shell_info['os_name']}
 - Shell: {shell_info['shell']}
 
-Return a JSON object with:
-- "summary": one-line summary of what the command does
-- "breakdown": array of strings, each explaining one part (command, flag, argument)
-- "risks": string describing side effects or risks (empty string if safe)"""
+RESPONSE FORMAT:
+Return JSON: {{"summary": "...", "breakdown": [...], "risks": "..."}}
+- "summary": one-line plain-English summary of what the command does.
+- "breakdown": array of strings, each explaining one part in order — the command name, then each flag, then each argument. Example for `grep -rn "TODO" src/`: ["grep — search for text patterns in files", "-r — search recursively through directories", "-n — show line numbers in output", '"TODO" — the pattern to search for', "src/ — the directory to search in"]
+- "risks": side effects, data loss potential, or platform-specific gotchas. Empty string if the command is safe and read-only."""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

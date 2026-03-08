@@ -254,7 +254,10 @@ def _suggest_aliases(ai_client=None) -> None:
                     print_info(f"  {'Name':<15} {'Command':<50} Reason")
                     print_info(f"  {'─'*15} {'─'*50} {'─'*30}")
                     for a in response.aliases:
-                        print_info(f"  {a['name']:<15} {a['command']:<50} {a.get('reason', '')}")
+                        name = a.name if hasattr(a, "name") else a.get("name", "")
+                        command = a.command if hasattr(a, "command") else a.get("command", "")
+                        reason = a.reason if hasattr(a, "reason") else a.get("reason", "")
+                        print_info(f"  {name:<15} {command:<50} {reason}")
 
                     # Ask to save
                     if is_clean_mode():
@@ -265,7 +268,9 @@ def _suggest_aliases(ai_client=None) -> None:
 
                     if choice == "y":
                         existing = load_aliases()
-                        existing.extend(response.aliases)
+                        for a in response.aliases:
+                            entry = a.model_dump() if hasattr(a, "model_dump") else a
+                            existing.append(entry)
                         save_aliases(existing)
                         print_success(f"Saved {len(response.aliases)} aliases.")
                     return
