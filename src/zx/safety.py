@@ -89,11 +89,26 @@ _SUPERSAFE_PATTERNS = [
         r"^(systeminfo|ipconfig|ifconfig)\s*$",
         r"^ping\s+",
         r"^(Get-ChildItem|Get-Content|Get-Location|Get-Date|Get-Process|Get-Service|Get-Command|Get-Host)\b",
+        r"^Get-Acl\b",
+        r"^Get-Item\b",
+        r"^Get-ItemProperty\b",
+        r"^\(Get-Item\b",
+        r"^Test-Path\b",
         r"^Write-Output\b",
+        r"^Select-String\b",
         r"^(type|where|which)\s+",
         r"^(df|du|free|top|ps|env|set|printenv)\b",
         r"^tree(\s+-[a-zA-Z]+)*\s*$",
         r"^(curl|wget)\s+.*--?(help|version)\s*$",
+        r"^\S+\s+--?(version|help)\s*$",  # any command with just --version or --help
+        r"^(file|stat|lsof|id|groups|uptime|arch|nproc|lsb_release|getconf)\b",
+        r"^(netstat|ss|nslookup|dig|tracert|traceroute|arp|route)\b",
+        r"^(dpkg|rpm)\s+(-l|-q|--list|--query)\b",
+        r"^(apt|apt-cache)\s+(list|show|search|policy)\b",
+        r"^(wmic|Get-WmiObject|Get-CimInstance)\b",
+        r"^(grep|rg|ag|findstr|Select-String)\b",
+        r"^find\s+.*-name\b",
+        r"^(less|more)\s+",
     ]
 ]
 

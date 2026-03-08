@@ -65,6 +65,7 @@ class PlanStep(BaseModel):
     step_number: int
     command: str
     explanation: str
+    is_read_only: bool  # True if command only reads/inspects (no writes, deletes, installs)
     is_reversible: bool
     undo_command: str  # empty string if not reversible
 
@@ -82,6 +83,11 @@ class PlanAdaptResponse(BaseModel):
     revised_steps: list[PlanStep]
     should_abort: bool
     abort_reason: str  # empty string if not aborting
+
+
+class SummaryResponse(BaseModel):
+    """AI response for summarizing command outputs into a human-readable answer."""
+    answer: str  # Concise, human-readable answer to the user's question
 
 
 class DiagnosisResponse(BaseModel):
@@ -225,7 +231,7 @@ You are the "zx" CLI. If the request matches a built-in command, return that ins
 
 
 def _build_plan_prompt(shell_info: dict, project_context: str) -> str:
-    return f"""You are a command-line planning assistant. Generate an execution plan for the user's objective.
+    return f"""You are a command-line planning assistant. Before generating a plan, think through these questions in order:
 
 ENVIRONMENT:
 - OS: {shell_info['os_name']} {shell_info['os_version']}
@@ -234,43 +240,51 @@ ENVIRONMENT:
 - Home: {shell_info['home_dir']}
 - Project: {project_context}
 
+THINK STEP BY STEP:
+
+Step 1 — WHAT IS THE OBJECTIVE?
+Restate the user's goal in one sentence. Identify what kind of request this is:
+  - INSPECTION: User wants to understand something on their system (files, directories, processes, ports, logs).
+    "this directory" or "this folder" = CWD shown above. Always run commands — never guess.
+  - SIMPLE TASK: One-command operation (list files, check version, show disk usage).
+  - ACTION: User wants to DO something (install, setup, deploy, create, configure).
+  - COMPLEX: Multi-phase work (project setup, migration, build pipeline).
+  - KNOWLEDGE: Purely conceptual question with no system context needed (what is X, explain Y, compare A vs B).
+    For KNOWLEDGE: put your answer in "summary", return empty "steps" array, and stop here.
+
+Step 2 — WHAT IS THE MINIMUM NEEDED?
+Ask yourself: what is the fewest number of commands that fully achieves the objective?
+  - INSPECTION: Usually 1 command. "what is this directory about?" → just list its contents. Don't add ACL, timestamps, or properties unless the user asked for them.
+  - SIMPLE: Always 1 command.
+  - ACTION: Only the steps that directly contribute. No "verify" steps unless verification is the point.
+  - COMPLEX: Phase it (explore → execute → verify), but each phase should be lean.
+  - If you have 3+ steps, ask: can any be combined or removed without losing value?
+
+Step 3 — CLASSIFY EACH COMMAND'S SAFETY
+For each command, determine:
+  - is_read_only: Does this command ONLY read/inspect/query without modifying anything?
+    TRUE for: ls, cat, Get-ChildItem, Get-Process, grep, find, --version, --help, status, log, diff, etc.
+    FALSE for: rm, mv, install, write, create, delete, modify, configure, >, tee, etc.
+  - is_reversible: Can this be undone? Only true if you provide a concrete undo_command.
+  Commands that are read-only or reversible can run with minimal friction.
+  Commands that are destructive and irreversible need the most caution.
+
+Step 4 — IS THE OUTPUT FORMAT APPROPRIATE?
+  - Prefer concise output. Use simple `ls` or `Get-ChildItem` over verbose `Format-List` with full property dumps.
+  - Don't pipe through formatters unless the user needs that specific format.
+  - Keep output human-readable and relevant to the question.
+
+Step 5 — GENERATE THE PLAN
+Now output the plan based on your reasoning above.
+
 RESPONSE FORMAT:
 Return JSON: {{"summary": "<plan overview>", "steps": [...], "warnings": "<caveats or empty>"}}
-Each step: {{"step_number": N, "command": "...", "explanation": "...", "is_reversible": bool, "undo_command": "..."}}
+Each step: {{"step_number": N, "command": "...", "explanation": "...", "is_read_only": bool, "is_reversible": bool, "undo_command": "..."}}
 
-INTENT CLASSIFICATION — classify the request, then plan accordingly:
-
-1. INSPECTION / EXPLORATION (user wants to understand something on their system):
-   Questions about files, directories, processes, services, logs, or system state.
-   These REQUIRE running commands to answer — generate steps to inspect, then summarize findings.
-   Examples: "what is this directory about?", "what's running on port 8080?", "what's in this file?", "what is c:\\tmp directory about?"
-   IMPORTANT: You have access to CWD shown above. "this directory" = the CWD. Always run commands to inspect — never answer from assumptions.
-
-2. SIMPLE TASKS (single-command operations):
-   Return exactly ONE step. No exploration or verification overhead.
-   Examples: "list files", "show disk usage", "check python version", "go to ~/projects"
-
-3. ACTIONABLE HOW-TO (user wants to DO something):
-   Return a focused plan with concrete steps.
-   Examples: "how to install docker", "set up nginx", "deploy this app", "create a react project"
-
-4. COMPLEX TASKS (multi-step installs, project setup, builds, deployments):
-   Use a phased approach — explore (check prerequisites), execute (do the work), verify (confirm success).
-   Break into small, focused steps. Each step should do ONE thing.
-
-5. KNOWLEDGE QUESTIONS (purely conceptual — no filesystem or system context needed):
-   The user wants abstract information unrelated to their specific system.
-   Put your answer in "summary" and return an empty "steps" array.
-   Examples: "what is a Docker container?", "explain TCP vs UDP", "compare REST vs GraphQL"
-   NEVER use this for questions about the user's actual files, directories, or system. Those are INSPECTION tasks.
-
-RULES:
+HARD RULES:
 - Commands must be valid for {shell_info['shell']}. On PowerShell, use `;` not `&&`.
-- MINIMIZE steps. Combine related operations where safe (e.g., `mkdir -p dir ; cd dir`). One command is better than three.
-- Do not include interactive commands. Use non-interactive alternatives (e.g., `-y` flags).
-- is_reversible=true only if you provide a concrete undo_command.
-- Maximum 15 steps. If more needed, explain in warnings.
-- Never generate demonstrative/example commands. Every step must serve the objective.
+- No interactive commands. Use non-interactive alternatives (e.g., `-y` flags).
+- Maximum 15 steps. Every step must directly serve the objective — no demonstrative or example commands.
 
 ZX SELF-AWARENESS:
 You are the "zx" CLI. If the request maps to a built-in command, return a single-step plan:
@@ -300,7 +314,7 @@ STRATEGY:
 RESPONSE FORMAT:
 Return JSON: {{"assessment": "<what happened and why>", "revised_steps": [...], "should_abort": false, "abort_reason": ""}}
 - If unrecoverable (hardware failure, impossible requirement, needs user intervention), set should_abort=true with a clear abort_reason.
-- revised_steps use same format: step_number, command, explanation, is_reversible, undo_command.
+- revised_steps use same format: step_number, command, explanation, is_read_only, is_reversible, undo_command.
 - Number revised_steps starting from the NEXT step number.
 - Commands must be valid for {shell_info['shell']}.
 - Prefer the simplest fix. Don't over-engineer."""
@@ -415,6 +429,7 @@ def _parse_plan_response(text: str) -> PlanResponse:
                 step_number=int(s.get("step_number", len(steps) + 1)),
                 command=_clean_command(_coerce_str(s.get("command", ""))),
                 explanation=_coerce_str(s.get("explanation", "")),
+                is_read_only=bool(s.get("is_read_only", False)),
                 is_reversible=bool(s.get("is_reversible", False)),
                 undo_command=_coerce_str(s.get("undo_command", "")),
             ))
@@ -443,6 +458,7 @@ def _parse_adapt_response(text: str) -> PlanAdaptResponse:
                 step_number=int(s.get("step_number", len(steps) + 1)),
                 command=_clean_command(_coerce_str(s.get("command", ""))),
                 explanation=_coerce_str(s.get("explanation", "")),
+                is_read_only=bool(s.get("is_read_only", False)),
                 is_reversible=bool(s.get("is_reversible", False)),
                 undo_command=_coerce_str(s.get("undo_command", "")),
             ))
@@ -798,6 +814,64 @@ Analyze the failure and provide revised steps to complete the objective, or reco
                 except Exception as e2:
                     self._handle_api_error(e2)
             self._handle_api_error(e)
+
+    def summarize_findings(self, objective: str, completed_steps: list) -> str:
+        """Synthesize command outputs into a human-readable answer.
+
+        Used after inspection/exploration plans to give the user an actual answer
+        instead of just showing raw command output.
+        """
+        outputs = "\n\n".join(
+            f"Command: {s.get('command', '')}\nOutput:\n{s.get('stdout', '')[:2000]}"
+            for s in completed_steps
+            if s.get("return_code", 0) == 0
+        )
+        messages = [
+            {"role": "system", "content": (
+                "You are a helpful assistant. The user asked a question and commands were run "
+                "to gather information. Synthesize the command outputs into a concise, "
+                "human-readable answer. Focus on what's useful and relevant. "
+                "Do NOT list raw output — summarize it meaningfully. "
+                "Keep it to 2-5 sentences unless the topic requires more detail."
+            )},
+            {"role": "user", "content": (
+                f"Question: {objective}\n\n"
+                f"Command outputs:\n{outputs}\n\n"
+                "Provide a clear, concise answer based on these outputs."
+            )},
+        ]
+        def _parse_summary(text: str) -> str:
+            text = text.strip()
+            if text.startswith("```"):
+                lines = text.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
+            try:
+                data = json.loads(text)
+                return _coerce_str(data.get("answer", text)) if isinstance(data, dict) else text
+            except (json.JSONDecodeError, TypeError):
+                return text.strip()
+
+        try:
+            text = self._call_llm(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1000,
+                response_schema=SummaryResponse,
+                method_name="summarize_findings",
+            )
+            return _parse_summary(text)
+        except Exception:
+            try:
+                text = self._call_llm(
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=1000,
+                    method_name="summarize_findings",
+                )
+                return _parse_summary(text)
+            except Exception:
+                return ""
 
     def start_chat(self, stdin_context: str = "") -> None:
         """Initialize multi-turn chat with manual message history."""

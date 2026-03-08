@@ -4,6 +4,33 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .ai import AIClient, PlanResponse, PlanStep, PlanAdaptResponse
+from .safety import analyze_risk as _pattern_risk
+
+
+def _effective_risk(step: PlanStep) -> str:
+    """Combine pattern-based risk with AI's safety assessment.
+
+    Pattern-based classification is the safety floor:
+    - DANGEROUS is never overridden (patterns catch truly destructive commands).
+    - MODERATE can be upgraded to SUPERSAFE if the AI classifies the command as
+      read-only, or to SAFE if the AI says it's reversible with an undo_command.
+    - SUPERSAFE and SAFE stay as-is.
+    """
+    pattern_risk = _pattern_risk(step.command)
+
+    # Never downgrade DANGEROUS
+    if pattern_risk == "DANGEROUS":
+        return "DANGEROUS"
+
+    # AI says read-only → treat as SUPERSAFE (unless pattern caught something dangerous)
+    if step.is_read_only:
+        return "SUPERSAFE"
+
+    # AI says reversible with undo → upgrade MODERATE to SAFE
+    if pattern_risk == "MODERATE" and step.is_reversible and step.undo_command:
+        return "SAFE"
+
+    return pattern_risk
 
 
 @dataclass
@@ -58,7 +85,6 @@ def run_plan_mode(
         S_DIM, SYM_MAG, SYM_CHECK,
     )
     from .executor import execute_command
-    from .safety import analyze_risk
     from . import history
 
     effective_auto = auto_approve and not force_confirm
@@ -116,7 +142,7 @@ def run_plan_mode(
         _handle_cd_command(plan.steps[0].command, plan.steps[0].explanation)
         return
 
-    risk_labels = [analyze_risk(step.command) for step in plan.steps]
+    risk_labels = [_effective_risk(step) for step in plan.steps]
 
     # Check if entire plan is supersafe — skip approval for small plans (≤3 steps)
     all_supersafe = (
@@ -167,7 +193,7 @@ def run_plan_mode(
                 if not plan.steps:
                     print_success("No commands needed.")
                     return
-                risk_labels = [analyze_risk(step.command) for step in plan.steps]
+                risk_labels = [_effective_risk(step) for step in plan.steps]
                 all_supersafe = all(r == "SUPERSAFE" for r in risk_labels) and not force_confirm
                 has_dangerous = "DANGEROUS" in risk_labels
                 if all_supersafe:
@@ -202,7 +228,7 @@ def run_plan_mode(
 
         print_plan_progress(step_num, total, step.command)
 
-        risk = analyze_risk(step.command)
+        risk = _effective_risk(step)
         print_command(step.command, step=step_num, risk_label=risk, explanation=step.explanation)
 
         if copy_mode:
@@ -237,7 +263,7 @@ def run_plan_mode(
                 print_abort()
                 return
             state.current_steps = state.current_steps[:state.current_index] + adapted.revised_steps
-            risk_labels = [analyze_risk(s.command) for s in state.current_steps]
+            risk_labels = [_effective_risk(s) for s in state.current_steps]
             phases = _assign_phases(risk_labels)
             prev_phase = None  # Reset so phase headers re-display
             print_plan_adaptation(adapted.assessment, len(adapted.revised_steps))
@@ -289,7 +315,7 @@ def run_plan_mode(
                         )
                     if adapted.revised_steps and not adapted.should_abort:
                         state.current_steps = state.current_steps[:state.current_index + 1] + adapted.revised_steps
-                        risk_labels = [analyze_risk(s.command) for s in state.current_steps]
+                        risk_labels = [_effective_risk(s) for s in state.current_steps]
                         phases = _assign_phases(risk_labels)
                         prev_phase = None
                         print_plan_adaptation(adapted.assessment, len(adapted.revised_steps))
@@ -316,12 +342,27 @@ def run_plan_mode(
 
             print_plan_adaptation(adapted.assessment, len(adapted.revised_steps))
             state.current_steps = state.current_steps[:state.current_index + 1] + adapted.revised_steps
-            risk_labels = [analyze_risk(s.command) for s in state.current_steps]
+            risk_labels = [_effective_risk(s) for s in state.current_steps]
             phases = _assign_phases(risk_labels)
             prev_phase = None
             state.current_index += 1
 
     _print_summary(state)
+
+    # Synthesize findings: if commands produced output, give the user an actual answer
+    all_ok = all(cs.get("return_code", 0) == 0 for cs in state.completed_steps)
+    has_output = any(cs.get("stdout", "").strip() for cs in state.completed_steps)
+    if all_ok and has_output and state.completed_steps:
+        try:
+            with show_spinner("summarizing"):
+                answer = ai.summarize_findings(prompt, state.completed_steps)
+            if answer:
+                from .ui import console
+                console.print()
+                console.print(f"  [bold]Answer:[/] {answer}")
+                console.print()
+        except Exception:
+            pass  # Summary failure is non-fatal
 
     # Save last plan for undo support
     _save_plan_for_undo(state)
