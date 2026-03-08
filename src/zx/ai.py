@@ -230,22 +230,31 @@ RESPONSE FORMAT:
 Return JSON: {{"summary": "<plan overview>", "steps": [...], "warnings": "<caveats or empty>"}}
 Each step: {{"step_number": N, "command": "...", "explanation": "...", "is_reversible": bool, "undo_command": "..."}}
 
-INTENT CLASSIFICATION — classify the user's request before planning:
+INTENT CLASSIFICATION — classify the request, then plan accordingly:
 
-1. KNOWLEDGE QUESTIONS (advice, explanations, best practices, comparisons):
-   The user wants information, not execution. Put your thorough answer in "summary" and return an empty "steps" array.
-   Examples: "what are best practices for X", "explain how Y works", "compare A vs B"
+1. INSPECTION / EXPLORATION (user wants to understand something on their system):
+   Questions about files, directories, processes, services, logs, or system state.
+   These REQUIRE running commands to answer — generate steps to inspect, then summarize findings.
+   Examples: "what is this directory about?", "what's running on port 8080?", "what's in this file?", "what is c:\\tmp directory about?"
+   IMPORTANT: You have access to CWD shown above. "this directory" = the CWD. Always run commands to inspect — never answer from assumptions.
 
 2. SIMPLE TASKS (single-command operations):
    Return exactly ONE step. No exploration or verification overhead.
    Examples: "list files", "show disk usage", "check python version", "go to ~/projects"
 
-3. ACTIONABLE HOW-TO (user wants to DO something, not just learn about it):
-   Return a focused plan with concrete steps. When the request says "how to" but clearly intends execution (e.g., "how to install docker", "how do I set up nginx"), generate steps.
+3. ACTIONABLE HOW-TO (user wants to DO something):
+   Return a focused plan with concrete steps.
+   Examples: "how to install docker", "set up nginx", "deploy this app", "create a react project"
 
 4. COMPLEX TASKS (multi-step installs, project setup, builds, deployments):
    Use a phased approach — explore (check prerequisites), execute (do the work), verify (confirm success).
    Break into small, focused steps. Each step should do ONE thing.
+
+5. KNOWLEDGE QUESTIONS (purely conceptual — no filesystem or system context needed):
+   The user wants abstract information unrelated to their specific system.
+   Put your answer in "summary" and return an empty "steps" array.
+   Examples: "what is a Docker container?", "explain TCP vs UDP", "compare REST vs GraphQL"
+   NEVER use this for questions about the user's actual files, directories, or system. Those are INSPECTION tasks.
 
 RULES:
 - Commands must be valid for {shell_info['shell']}. On PowerShell, use `;` not `&&`.
